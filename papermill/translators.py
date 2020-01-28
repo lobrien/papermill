@@ -135,6 +135,17 @@ class PythonTranslator(Translator):
     def comment(cls, cmt_str):
         return '# {}'.format(cmt_str).strip()
 
+    @classmethod
+    def codify(cls, parameters):
+        content = super(PythonTranslator, cls).codify(parameters)
+        if sys.version_info >= (3, 6):
+            # Put content through the Black Python code formatter
+            import black
+
+            fm = black.FileMode(string_normalization=False)
+            content = black.format_str(content, mode=fm)
+        return content
+
 
 class RTranslator(Translator):
     @classmethod
@@ -164,7 +175,7 @@ class RTranslator(Translator):
     @classmethod
     def assign(cls, name, str_val):
         # Leading '_' aren't legal R variable names -- so we drop them when injecting
-        while (name.startswith("_")):
+        while name.startswith("_"):
             name = name[1:]
         return '{} = {}'.format(name, str_val)
 
@@ -247,12 +258,8 @@ class MatlabTranslator(Translator):
 
     @classmethod
     def translate_dict(cls, val):
-        keys = ', '.join(
-            ["{}".format(cls.__translate_char_array(k)) for k, v in val.items()]
-        )
-        vals = ', '.join(
-            ["{}".format(cls.translate(v)) for k, v in val.items()]
-        )
+        keys = ', '.join(["{}".format(cls.__translate_char_array(k)) for k, v in val.items()])
+        vals = ', '.join(["{}".format(cls.translate(v)) for k, v in val.items()])
         return 'containers.Map({{{}}}, {{{}}})'.format(keys, vals)
 
     @classmethod
@@ -272,15 +279,14 @@ class MatlabTranslator(Translator):
         return content
 
 
-class CSharpTranslator(Translator) :
-
+class CSharpTranslator(Translator):
     @classmethod
-    def translate_none(cls, val) :
+    def translate_none(cls, val):
         # Can't figure out how to do this as nullable
         raise NotImplementedError("Option type not implemented for C#.")
 
     @classmethod
-    def translate_bool(cls, val) :
+    def translate_bool(cls, val):
         return 'true' if val else 'false'
 
     @classmethod
@@ -293,8 +299,7 @@ class CSharpTranslator(Translator) :
         """Translate dicts to nontyped dictionary"""
 
         kvps = ', '.join(
-            ["{{ {} , {} }}".format(cls.translate_str(k), cls.translate(v))
-             for k, v in val.items()]
+            ["{{ {} , {} }}".format(cls.translate_str(k), cls.translate(v)) for k, v in val.items()]
         )
         return 'new Dictionary<string,Object>{{ {} }}'.format(kvps)
 
@@ -313,6 +318,44 @@ class CSharpTranslator(Translator) :
         return 'var {} = {};'.format(name, str_val)
 
 
+class FSharpTranslator(Translator):
+    @classmethod
+    def translate_none(cls, val):
+        return 'None'
+
+    @classmethod
+    def translate_bool(cls, val):
+        return 'true' if val else 'false'
+
+    @classmethod
+    def translate_int(cls, val):
+        strval = cls.translate_raw_str(val)
+        return strval + "L" if (val > 2147483647 or val < -2147483648) else strval
+
+    @classmethod
+    def translate_dict(cls, val):
+        tuples = '; '.join(
+            [
+                "({}, {} :> IComparable)".format(cls.translate_str(k), cls.translate(v))
+                for k, v in val.items()
+            ]
+        )
+        return '[ {} ] |> Map.ofList'.format(tuples)
+
+    @classmethod
+    def translate_list(cls, val):
+        escaped = '; '.join([cls.translate(v) for v in val])
+        return '[ {} ]'.format(escaped)
+
+    @classmethod
+    def comment(cls, cmt_str):
+        return '(* {} *)'.format(cmt_str).strip()
+
+    @classmethod
+    def assign(cls, name, str_val):
+        return 'let {} = {}'.format(name, str_val)
+
+
 # Instantiate a PapermillIO instance and register Handlers.
 papermill_translators = PapermillTranslators()
 papermill_translators.register("python", PythonTranslator)
@@ -321,6 +364,7 @@ papermill_translators.register("scala", ScalaTranslator)
 papermill_translators.register("julia", JuliaTranslator)
 papermill_translators.register("matlab", MatlabTranslator)
 papermill_translators.register(".net-csharp", CSharpTranslator)
+papermill_translators.register(".net-fsharp", FSharpTranslator)
 
 
 def translate_parameters(kernel_name, language, parameters):

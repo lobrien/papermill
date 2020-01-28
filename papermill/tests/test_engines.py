@@ -102,7 +102,11 @@ class TestNotebookExecutionManager(unittest.TestCase):
             self.assertIsNone(cell.metadata.papermill['duration'])
             self.assertIsNone(cell.metadata.papermill['exception'])
             self.assertEqual(cell.metadata.papermill['status'], NotebookExecutionManager.PENDING)
-            self.assertIsNone(cell.execution_count)
+            self.assertIsNone(cell.get('execution_count'))
+            if cell.cell_type == 'code':
+                self.assertEqual(cell.get('outputs'), [])
+            else:
+                self.assertIsNone(cell.get('outputs'))
 
         nb_man.save.assert_called_once()
 
@@ -110,6 +114,12 @@ class TestNotebookExecutionManager(unittest.TestCase):
         nb_man = NotebookExecutionManager(self.nb)
         nb_man.notebook_start(nb=self.foo_nb)
         self.assertEqual(nb_man.nb.metadata['foo'], 'bar')
+
+    def test_notebook_start_markdown_code(self):
+        nb_man = NotebookExecutionManager(self.nb)
+        nb_man.notebook_start(nb=self.foo_nb)
+        self.assertNotIn('execution_count', nb_man.nb.cells[-1])
+        self.assertNotIn('outputs', nb_man.nb.cells[-1])
 
     def test_cell_start(self):
         nb_man = NotebookExecutionManager(self.nb)
@@ -294,7 +304,7 @@ class TestEngineBase(unittest.TestCase):
 
     def test_wrap_and_execute_notebook(self):
         '''
-        Mocks each wrapped call and proves the correct inputs get applies to
+        Mocks each wrapped call and proves the correct inputs get applied to
         the correct underlying calls for execute_notebook.
         '''
         with patch.object(Engine, 'execute_managed_notebook') as exec_mock:
@@ -309,7 +319,11 @@ class TestEngineBase(unittest.TestCase):
                 )
 
                 wrap_mock.assert_called_once_with(
-                    self.nb, output_path='foo.ipynb', progress_bar=False, log_output=True
+                    self.nb,
+                    output_path='foo.ipynb',
+                    progress_bar=False,
+                    log_output=True,
+                    autosave_cell_every=30,
                 )
                 wrap_mock.return_value.notebook_start.assert_called_once()
                 exec_mock.assert_called_once_with(

@@ -40,23 +40,33 @@ class TestNotebookHelpers(unittest.TestCase):
     def test_start_timeout(self, preproc_mock):
         execute_notebook(self.notebook_path, self.nb_test_executed_fname, start_timeout=123)
         args, kwargs = preproc_mock.call_args
-        expected = [('timeout', None), ('startup_timeout', 123),
-                    ('kernel_name', kernel_name), ('log', logger)]
+        expected = [
+            ('timeout', None),
+            ('startup_timeout', 123),
+            ('kernel_name', kernel_name),
+            ('log', logger),
+        ]
         actual = set([(key, kwargs[key]) for key in kwargs])
-        self.assertTrue(set(expected).issubset(actual),
-                        msg='Expected arguments {} are not a subset of actual {}'.format(expected,
-                                                                                         actual))
+        self.assertTrue(
+            set(expected).issubset(actual),
+            msg='Expected arguments {} are not a subset of actual {}'.format(expected, actual),
+        )
 
     @patch(engines.__name__ + '.PapermillExecutePreprocessor')
     def test_default_start_timeout(self, preproc_mock):
         execute_notebook(self.notebook_path, self.nb_test_executed_fname)
         args, kwargs = preproc_mock.call_args
-        expected = [('timeout', None), ('startup_timeout', 60),
-                    ('kernel_name', kernel_name), ('log', logger)]
+        expected = [
+            ('timeout', None),
+            ('startup_timeout', 60),
+            ('kernel_name', kernel_name),
+            ('log', logger),
+        ]
         actual = set([(key, kwargs[key]) for key in kwargs])
-        self.assertTrue(set(expected).issubset(actual),
-                        msg='Expected arguments {} are not a subset of actual {}'.format(expected,
-                                                                                         actual))
+        self.assertTrue(
+            set(expected).issubset(actual),
+            msg='Expected arguments {} are not a subset of actual {}'.format(expected, actual),
+        )
 
     def test_cell_insertion(self):
         execute_notebook(self.notebook_path, self.nb_test_executed_fname, {'msg': 'Hello'})
@@ -260,3 +270,50 @@ class TestCWD(unittest.TestCase):
         self.assertTrue(
             os.path.isfile(os.path.join(self.base_test_dir, self.nb_test_executed_fname))
         )
+
+
+class TestSysExit(unittest.TestCase):
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.test_dir)
+
+    def test_sys_exit(self):
+        notebook_name = 'sysexit.ipynb'
+        result_path = os.path.join(self.test_dir, 'output_{}'.format(notebook_name))
+        execute_notebook(get_notebook_path(notebook_name), result_path)
+        nb = load_notebook_node(result_path)
+        self.assertEqual(nb.cells[0].cell_type, "code")
+        self.assertEqual(nb.cells[0].execution_count, 1)
+        self.assertEqual(nb.cells[1].execution_count, 2)
+        self.assertEqual(nb.cells[1].outputs[0].output_type, 'error')
+        self.assertEqual(nb.cells[1].outputs[0].ename, 'SystemExit')
+        self.assertEqual(nb.cells[1].outputs[0].evalue, '')
+        self.assertEqual(nb.cells[2].execution_count, None)
+
+    def test_sys_exit0(self):
+        notebook_name = 'sysexit0.ipynb'
+        result_path = os.path.join(self.test_dir, 'output_{}'.format(notebook_name))
+        execute_notebook(get_notebook_path(notebook_name), result_path)
+        nb = load_notebook_node(result_path)
+        self.assertEqual(nb.cells[0].cell_type, "code")
+        self.assertEqual(nb.cells[0].execution_count, 1)
+        self.assertEqual(nb.cells[1].execution_count, 2)
+        self.assertEqual(nb.cells[1].outputs[0].output_type, 'error')
+        self.assertEqual(nb.cells[1].outputs[0].ename, 'SystemExit')
+        self.assertEqual(nb.cells[1].outputs[0].evalue, '0')
+        self.assertEqual(nb.cells[2].execution_count, None)
+
+    def test_sys_exit1(self):
+        notebook_name = 'sysexit1.ipynb'
+        result_path = os.path.join(self.test_dir, 'output_{}'.format(notebook_name))
+        with self.assertRaises(PapermillExecutionError):
+            execute_notebook(get_notebook_path(notebook_name), result_path)
+        nb = load_notebook_node(result_path)
+        self.assertEqual(nb.cells[0].cell_type, "code")
+        self.assertEqual(nb.cells[0].outputs[0].output_type, "display_data")
+        self.assertEqual(nb.cells[1].execution_count, 1)
+        self.assertEqual(nb.cells[2].execution_count, 2)
+        self.assertEqual(nb.cells[2].outputs[0].output_type, 'error')
+        self.assertEqual(nb.cells[3].execution_count, None)

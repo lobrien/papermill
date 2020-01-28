@@ -88,19 +88,24 @@ class NotebookExecutionManager(object):
     COMPLETED = "completed"
     FAILED = "failed"
 
-    def __init__(self, nb, output_path=None, log_output=False, progress_bar=True):
+    def __init__(
+        self, nb, output_path=None, log_output=False, progress_bar=True, autosave_cell_every=30
+    ):
         # Deep copy the input to isolate the object being executed against
         self.nb = copy.deepcopy(nb)
         self.output_path = output_path
         self.log_output = log_output
         self.start_time = None
         self.end_time = None
+        self.autosave_cell_every = autosave_cell_every
+        self.max_autosave_pct = 25
+        self.last_save_time = self.now()  # Not exactly true, but simplifies testing logic
         self.pbar = None
         if progress_bar:
             # lazy import due to implict slow ipython import
             from tqdm.auto import tqdm
-            self.pbar = tqdm(total=len(self.nb.cells), unit="cell",
-                             desc="Executing")
+
+            self.pbar = tqdm(total=len(self.nb.cells), unit="cell", desc="Executing")
 
     def now(self):
         """Helper to return current UTC time"""
@@ -132,6 +137,29 @@ class NotebookExecutionManager(object):
         """
         if self.output_path:
             write_ipynb(self.nb, self.output_path)
+        self.last_save_time = self.now()
+
+    @catch_nb_assignment
+    def autosave_cell(self):
+        """Saves the notebook if it's been more than self.autosave_cell_every seconds
+        since it was last saved.
+        """
+        if self.autosave_cell_every == 0:
+            # feature is disabled
+            return
+        time_since_last_save = (self.now() - self.last_save_time).total_seconds()
+        if time_since_last_save >= self.autosave_cell_every:
+            start_save = self.now()
+            self.save()
+            save_elapsed = (self.now() - start_save).total_seconds()
+            if save_elapsed > self.autosave_cell_every * self.max_autosave_pct / 100.0:
+                # Autosave is taking too long, so exponentially back off.
+                self.autosave_cell_every *= 2
+                logger.warning(
+                    "Autosave too slow: {:.2f} sec, over {}% limit. Backing off to {} sec".format(
+                        save_elapsed, self.max_autosave_pct, self.autosave_cell_every
+                    )
+                )
 
     @catch_nb_assignment
     def notebook_start(self, **kwargs):
@@ -153,7 +181,7 @@ class NotebookExecutionManager(object):
 
         for cell in self.nb.cells:
             # Reset the cell execution counts.
-            if cell.get("execution_count") is not None:
+            if cell.get("cell_type") == "code":
                 cell.execution_count = None
 
             # Clear out the papermill metadata for each cell.
@@ -164,7 +192,7 @@ class NotebookExecutionManager(object):
                 duration=None,
                 status=self.PENDING,  # pending, running, completed
             )
-            if cell.get("outputs") is not None:
+            if cell.get("cell_type") == "code":
                 cell.outputs = []
 
         self.save()
@@ -285,7 +313,14 @@ class Engine(object):
 
     @classmethod
     def execute_notebook(
-        cls, nb, kernel_name, output_path=None, progress_bar=True, log_output=False, **kwargs
+        cls,
+        nb,
+        kernel_name,
+        output_path=None,
+        progress_bar=True,
+        log_output=False,
+        autosave_cell_every=30,
+        **kwargs
     ):
         """
         A wrapper to handle notebook execution tasks.
@@ -296,7 +331,11 @@ class Engine(object):
         iterating and executing the cell contents.
         """
         nb_man = NotebookExecutionManager(
-            nb, output_path=output_path, progress_bar=progress_bar, log_output=log_output
+            nb,
+            output_path=output_path,
+            progress_bar=progress_bar,
+            log_output=log_output,
+            autosave_cell_every=autosave_cell_every,
         )
 
         nb_man.notebook_start()

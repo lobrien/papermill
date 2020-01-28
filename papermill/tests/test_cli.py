@@ -80,11 +80,13 @@ class TestCLI(unittest.TestCase):
         parameters={},
         engine_name=None,
         request_save_on_cell_execute=True,
+        autosave_cell_every=30,
         prepare_only=False,
         kernel_name=None,
         log_output=False,
         progress_bar=True,
         start_timeout=60,
+        execution_timeout=None,
         report_mode=False,
         cwd=None,
         stdout_file=None,
@@ -289,8 +291,18 @@ class TestCLI(unittest.TestCase):
 
     @patch(cli.__name__ + '.execute_notebook')
     def test_start_timeout(self, execute_patch):
+        self.runner.invoke(papermill, self.default_args + ['--start-timeout', '123'])
+        execute_patch.assert_called_with(**self.augment_execute_kwargs(start_timeout=123))
+
+    @patch(cli.__name__ + '.execute_notebook')
+    def test_start_timeout_backwards_compatibility(self, execute_patch):
         self.runner.invoke(papermill, self.default_args + ['--start_timeout', '123'])
         execute_patch.assert_called_with(**self.augment_execute_kwargs(start_timeout=123))
+
+    @patch(cli.__name__ + '.execute_notebook')
+    def test_execution_timeout(self, execute_patch):
+        self.runner.invoke(papermill, self.default_args + ['--execution-timeout', '123'])
+        execute_patch.assert_called_with(**self.augment_execute_kwargs(execution_timeout=123))
 
     @patch(cli.__name__ + '.execute_notebook')
     def test_report_mode(self, execute_patch):
@@ -331,9 +343,13 @@ class TestCLI(unittest.TestCase):
                 'engine-that-could',
                 '--prepare-only',
                 '--log-output',
+                '--autosave-cell-every',
+                '17',
                 '--no-progress-bar',
-                '--start_timeout',
+                '--start-timeout',
                 '321',
+                '--execution-timeout',
+                '654',
                 '--report-mode',
             ],
         )
@@ -349,11 +365,13 @@ class TestCLI(unittest.TestCase):
                 },
                 engine_name='engine-that-could',
                 request_save_on_cell_execute=True,
+                autosave_cell_every=17,
                 prepare_only=True,
                 kernel_name='R',
                 log_output=True,
                 progress_bar=False,
                 start_timeout=321,
+                execution_timeout=654,
                 report_mode=True,
                 cwd=None,
             )
@@ -382,20 +400,22 @@ def papermill_version():
 def notebook():
     for name in kernelspec.find_kernel_specs():
         ks = kernelspec.get_kernel_spec(name)
-        metadata = {'kernelspec': {'name': name,
-                                   'language': ks.language,
-                                   'display_name': ks.display_name}}
+        metadata = {
+            'kernelspec': {'name': name, 'language': ks.language, 'display_name': ks.display_name}
+        }
         return nbformat.v4.new_notebook(
             metadata=metadata,
-            cells=[nbformat.v4.new_markdown_cell(
-                'This is a notebook with kernel: ' + ks.display_name)])
+            cells=[
+                nbformat.v4.new_markdown_cell('This is a notebook with kernel: ' + ks.display_name)
+            ],
+        )
 
     raise EnvironmentError('No kernel found')
 
 
 require_papermill_installed = pytest.mark.skipif(
-    not papermill_version(),
-    reason='papermill is not installed')
+    not papermill_version(), reason='papermill is not installed'
+)
 
 
 @require_papermill_installed
@@ -492,13 +512,19 @@ def test_stdout_file(tmpdir):
     stdout_file = tmpdir.join('notebook.stdout')
     secret = str(uuid.uuid4())
 
-    process = papermill_cli([
-        get_notebook_path('simple_execute.ipynb'),
-        str(nb_file),
-        '-k', kernel_name,
-        '-p', 'msg', secret,
-        '--stdout-file', str(stdout_file),
-    ])
+    process = papermill_cli(
+        [
+            get_notebook_path('simple_execute.ipynb'),
+            str(nb_file),
+            '-k',
+            kernel_name,
+            '-p',
+            'msg',
+            secret,
+            '--stdout-file',
+            str(stdout_file),
+        ]
+    )
     out, err = process.communicate()
 
     assert not out
